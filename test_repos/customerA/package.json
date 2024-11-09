@@ -1,0 +1,31 @@
+{
+  "name": "KloudFarm",
+  "version": "1.0.0",
+  "description": "KloudFarm",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node start.js"
+  },
+  "engines": {
+    "node": ">=7.6.0",
+    "npm": ">=4.1.2"
+  },
+  "author": "KloudFarm",
+  "license": "ISC",
+  "dependencies": {
+	  "mongodb": "*",
+    "mongoose": "*",
+    "ioredis": "^4.28.2"
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gfg/gfg.git" 
+  },
+  "bugs": {
+    "url": "https://github.com/gfg/gfg/issues"
+  },
+  "homepage": "https://github.com/gfg/gfg#readme"
+}
+
