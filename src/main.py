@@ -1,10 +1,13 @@
 import json
+
+import git.exc
 import yaml
 from copy import deepcopy
 from typing import Any
 
 from git import Repo
 import os
+import streamlit as st
 
 class Services:
     LOAD_BALANCER = "lb"
@@ -69,7 +72,6 @@ def parse_from_nginx_conf(file_content: str):
     return
 
 def parse_from_package_json(file_content: str):
-    print(file_content)
     json_dict = json.loads(file_content)
     services_discovered[Services.APP_SERVER] = "node.js"
     dependencies = json_dict.get("dependencies")
@@ -245,25 +247,64 @@ def build_aws_architecture(customerA_services, customerB_services) -> str:
             aws_cloud["Children"].append("SNS")
 
     print(architecture_content_dict)
-    return yaml.dump(architecture_content_dict)
+    return json.dumps(architecture_content_dict)
 
 
-if __name__ == '__main__':
+def m1(customerArepo, customerBrepo):
 
     # Example usage
     # repo_url = 'https://github.com/hameem76/hameem76.git'  # Replace with your repository URL0
-    repo_directory = '/home/hameem/git_repos/hameem76/test_repos/customerA'  # Replace with the desired directory
-    #clone_repo(repo_url, repo_directory)
+    repo_directory = "/tmp/testrepos/customerA"# '/home/hameem/git_repos/hameem76/test_repos/customerA'  # Replace with the desired directory
+    try:
+        clone_repo(customerArepo, repo_directory)
+    except git.exc.GitError as ge:
+        print(f"Git repo does not exist {customerArepo}")
+        raise Exception(f"Git repo does not exist {customerArepo}")
+
     customerA = deepcopy(discover_services_in_repo(repo_directory))
-    repo_directory = '/home/hameem/git_repos/hameem76/test_repos/customerB'  # Replace with the desired directory
-    #clone_repo(repo_url, repo_directory)
+    repo_directory = "/tmp/testrepos/customerB"#'/home/hameem/git_repos/hameem76/test_repos/customerB'  # Replace with the desired directory
+    try:
+        clone_repo(customerBrepo, repo_directory)
+    except git.exc.GitError as ge:
+        print(f"Git repo does not exist {customerBrepo}")
+        raise Exception(f"Git repo does not exist {customerBrepo}")
+
     customerB = deepcopy(discover_services_in_repo(repo_directory))
     #print("discovery", services_discovered)
     #print(customerA)
-    architecture_content = build_aws_architecture(customerA, customerB)
+    architecture_content = build_aws_architecture(customerA, customerB) 
     print("architecture \n", architecture_content)
+    return architecture_content
+    #st.write("hello world")
     # print("Files in repository:")
     # for file in files:
     #     print(file)
 
 
+if __name__ == '__main__':
+    # Buiild the UI
+    standalone = False
+    if standalone:
+        customerA_url = "https://github.com/hameem76/hameem76//test_repo/customerA"#st.text_input("CustomerA Repo URL")
+        customerB_url =  "https://github.com/hameem76/hameem76//test_repo/customerB"#st.text_input("CustomerB repo URL")
+        m1(customerA_url, customerB_url)
+
+    else:
+        st.title("Discover Services from Git repos")
+        customerA_url = st.text_input("Customer-A Repo URL")
+        customerB_url = st.text_input("Customer-B Repo URL")
+        try:
+            if st.button("Submit"):
+                architecture = m1(customerA_url, customerB_url)
+                st.json(architecture)
+        except Exception as ex:
+            st.error(str(ex))
+        finally:
+            import shutil
+            repo_dir = "/tmp/testrepos"
+            if os.path.exists(repo_dir):
+                shutil.rmtree(repo_dir)
+
+    # print(customerB_url, customerA_url)
+    # if st.button("Submit"):
+    #     m1(customerA_url, customerB_url)
