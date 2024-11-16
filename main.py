@@ -310,7 +310,7 @@ if __name__ == '__main__':
                 architecture = m1(customerA_url, customerB_url)
                 st.json(architecture)
                 generate_architecture_diagram()
-                st.image("my_test/diagram.png")
+                st.image("/tmp/diagram.png")
         except Exception as ex:
             st.error(str(ex))
         finally:

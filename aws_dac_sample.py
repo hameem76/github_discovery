@@ -17,7 +17,7 @@ from diagrams.aws.network import ELB
 def generate_architecture_diagram():
     from diagrams.aws.compute import EC2Instances, EC2Ami, LambdaFunction, EC2Instance, EC2
 
-    with Diagram("Diagram", direction="TB"):
+    with Diagram("Diagram", direction="TB", filename="/tmp/diagram"):
         with Cluster("Compute Cluster"):
             EC2=EC2("EC2")
             EC2Instance=EC2Instance("EC2Instance")
