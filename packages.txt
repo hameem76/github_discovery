@@ -1,2 +1,6 @@
 xdg-utils
+links2
+links
+w3m
+lynx
 graphviz
