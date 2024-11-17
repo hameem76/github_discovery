@@ -1,13 +1,28 @@
 import json
+import os
+from typing import Any
 
 import git.exc
-#import yaml
-
-from git import Repo
-import os
 import streamlit as st
+from diagrams import Diagram, Cluster
+from diagrams.aws.compute import EC2, EC2Instances, Lambda
+from diagrams.aws.database import Database, ElasticacheForRedis, ElasticacheForMemcached
+from diagrams.aws.integration import SimpleQueueServiceSqs, SimpleNotificationServiceSns
+from diagrams.aws.management import Cloudtrail
+from diagrams.aws.network import ElasticLoadBalancing, CloudFront
+from diagrams.aws.storage import SimpleStorageServiceS3
+from diagrams.onprem.client import Client
+from diagrams.onprem.compute import Server
+from git import Repo
+
+import aws_dac_generator
+
+
+# import yaml
+
 
 class Services:
+    WEB_SERVER = "web_server"
     LOAD_BALANCER = "lb"
     MQ = "message_queue"
     AWS_CLOUDTRAIL = "aws_cloudtrail"
@@ -33,7 +48,7 @@ def find_between( s, first, last ):
     except ValueError:
         return ""
 
-class GitHubDisovery():
+class Githubdisovery():
     def __init__(self):
         self.services_discovered = {}
 
@@ -70,13 +85,13 @@ class GitHubDisovery():
             if entry.strip().startswith("server"):
                 servers_count += 1
                 servers.append(entry.strip().split(" ")[1])
-        self.services_discovered[Services.LOAD_BALANCER] = {"server_count": servers_count, "servers": servers}
+        self.services_discovered[Services.LOAD_BALANCER] = {"servers_count": servers_count, "servers": servers}
         return
 
     def parse_from_package_json(self, file_content: str):
         json_dict = json.loads(file_content)
         services_discovered = self.services_discovered
-        services_discovered[Services.APP_SERVER] = "node.js"
+        services_discovered[Services.APP_SERVER] = "NodeJs"
         dependencies = json_dict.get("dependencies")
         discovery_map = [
             {
@@ -163,7 +178,10 @@ class GitHubDisovery():
                 elif filename == 'load-balancer.conf':
                     file_content = read_file(file_path)
                     self.parse_from_nginx_conf(file_content)
-                services_discovered[Services.STATIC_CONTENT] = "enabled"
+                elif filename.split(".")[-1].lower() in ["jpg", "jpeg", "png", "mpg", "mp4", "swf", "avi" ]:
+                    services_discovered[Services.STATIC_CONTENT] = "enabled"
+                elif filename.split(".")[-1].lower() in ["js"]:
+                    services_discovered[Services.WEB_SERVER] = 'enabled'
 
                 #files.append(file_path)
         return services_discovered
@@ -183,7 +201,7 @@ def read_file(filepath):
     return content
 
 
-def build_aws_architecture(customerA_services, customerB_services) -> str:
+def build_aws_architecture(customerA_services, customerB_services) -> dict:
     architecture_content_dict = {
         "Diagram": {
             "DefinitionFiles":[{
@@ -247,7 +265,8 @@ def build_aws_architecture(customerA_services, customerB_services) -> str:
             aws_cloud["Children"].append("S3")
 
     #print(architecture_content_dict)
-    return json.dumps(architecture_content_dict)
+    return architecture_content_dict
+    #return json.dumps(architecture_content_dict)
 
 
 def m1(customerArepo, customerBrepo):
@@ -262,7 +281,7 @@ def m1(customerArepo, customerBrepo):
         raise Exception(f"Git repo does not exist {customerArepo}")
 
     #customerA = deepcopy(discover_services_in_repo(repo_directory))
-    customerA = GitHubDisovery().discover_services_in_repo(repo_directory)
+    customerA = Githubdisovery().discover_services_in_repo(repo_directory)
     #print("CustomerA", customerA)
     repo_directory = "/tmp/testrepos/customerB"#'/home/hameem/git_repos/hameem76/test_repos/customerB'  # Replace with the desired directory
     try:
@@ -271,7 +290,7 @@ def m1(customerArepo, customerBrepo):
         print(f"Git repo does not exist {customerBrepo}")
         raise Exception(f"Git repo does not exist {customerBrepo}")
 
-    customerB = GitHubDisovery().discover_services_in_repo(repo_directory)
+    customerB = Githubdisovery().discover_services_in_repo(repo_directory)
     #print("CustomerB", customerA)
     #print("discovery", services_discovered)
     #print(customerA)
@@ -283,32 +302,117 @@ def m1(customerArepo, customerBrepo):
     # for file in files:
     #     print(file)
 
+def discover_services(customer, repo):
+    repo_directory = f"/tmp/testrepos/{customer}"
+    try:
+        clone_repo(repo, repo_directory)
+    except git.exc.GitError as ge:
+        print(f"Git repo does not exist {repo}")
+        raise Exception(f"Git repo does not exist {repo}")
+
+    discovered_services = Githubdisovery().discover_services_in_repo(repo_directory)
+    return discovered_services
+
+def generate_architecture_diagram(customerA_discovery, customerB_discovery):
+    for customer, discovery in {"CustomerA": customerA_discovery, "CustomerB": customerB_discovery}.items():
+        with Diagram(f"AWS Architecture - {customer}", filename=f"/tmp/diagrams/{customer}", show=False, direction="LR"):
+            client = Client("Client")
+            cdn = None
+            app_server = discovery.get(Services.APP_SERVER) or discovery.get(Services.DOCKER, {}).get(Services.APP_SERVER)
+            ec2_object = None
+            with Cluster("AWS") as aws_cluster:
+                if discovery.get(Services.STATIC_CONTENT) == 'enabled':
+                    cdn = CloudFront("Content Delivery")
+                if elb_detail := discovery.get(Services.LOAD_BALANCER):
+                    elb = ElasticLoadBalancing("Application LB")
+                    if cdn:
+                        cdn >> elb
+
+                    if elb:
+                        with Cluster("EC2 instance"):
+                            ec2_instances = EC2Instances(f"EC2 {" ".join(elb_detail.get("servers", ""))}")
+                            if app_server:
+                                Server(app_server)
+                            if cdn:
+                                Server("Webserver")
+                            ec2_object =  ec2_instances
+                            elb >> ec2_instances
+                else:
+                    ec2 = EC2("EC2")
+                    ec2_object= ec2
+                    if app_server:
+                        Server(app_server)
+                    if cdn:
+                        Server("WebServer")
+                    prev_element = cdn or client
+                    prev_element >> ec2
+
+            database = discovery.get(Services.DATABASE, [])
+            db_objects = []
+            for db in database:
+                db_obj = Database(db)
+                db_objects.append(db_obj)
+
+            ec2_links: list[Any] = db_objects
+            if discovered_caches := discovery.get(Services.CACHE) :
+                for cache_obj in  discovered_caches:
+                    if cache_obj == 'redis':
+                        cached_diag_obj = ElasticacheForRedis("Redis")
+                    else:
+                        cached_diag_obj = ElasticacheForMemcached("Other Cache")
+                if discovery.get(Services.AWS_SQS) == 'enabled':
+                    ec2_links.append(SimpleQueueServiceSqs("SQS Messaging"))
+                if discovery.get(Services.AWS_SNS) == 'enabled':
+                    ec2_links.append(SimpleNotificationServiceSns("SNS messaging"))
+                if discovery.get(Services.AWS_S3) == 'enabled':
+                    ec2_links.append(SimpleStorageServiceS3("S3"))
+                if discovery.get(Services.AWS_LAMBDA) == 'enabled':
+                    ec2_links.append(Lambda("Lambda"))
+                if discovery.get(Services.AWS_CLOUDTRAIL) == 'enabled':
+                    ec2_links.append(Cloudtrail("Cloudtrail"))
+
+                ec2_links.append(cached_diag_obj)
+            ec2_object >> ec2_links
+            client >> (cdn or elb)
+
+    #print("Diagram generated")
+
 
 if __name__ == '__main__':
+    import shutil
     # Buiild the UI
-    standalone = True
+    standalone = False
     if standalone:
         customerA_url = "https://github.com/hameem76/test_repo_customerA"#st.text_input("CustomerA Repo URL")
         customerB_url =  "https://github.com/hameem76/test_repo_customerB"#st.text_input("CustomerB repo URL")
-        architecture = m1(customerA_url, customerB_url)
+        #architecture = m1(customerA_url, customerB_url)
+        customerA_discoveries = discover_services("CustomerA", customerA_url)
+        customerB_discoveries = discover_services("CustomerB", customerB_url)
+        #print(customerA_discoveries, customerB_discoveries)
+        generate_architecture_diagram(customerA_discoveries, customerB_discoveries)
+        # repo_dirs = ["/tmp/testrepos", "/tmp/diagrams"]
+        # for repo_dir in repo_dirs:
+        #     if os.path.exists(repo_dir):
+        #         shutil.rmtree(repo_dir)
         #print(architecture)
 
     else:
-        st.title("Discover Services from Git repos")
+        st.title("Discover Services from Git repos and build architecture")
         customerA_url = st.text_input("Customer-A Repo URL")
         customerB_url = st.text_input("Customer-B Repo URL")
         try:
-            if st.button("Submit"):
-                architecture = m1(customerA_url, customerB_url)
-                st.json(architecture)
+            if st.button("Generate"):
+                #architecture = m1(customerA_url, customerB_url)
+                customerA_discoveries = discover_services("CustomerA", customerA_url)
+                customerB_discoveries = discover_services("CustomerB", customerB_url)
+                aws_dac_generator.generate_architecture_diagram(customerA_discoveries, customerB_discoveries)
+                #generate_architecture_diagram(customerA_discoveries, customerB_discoveries)
+                st.image("/tmp/diagrams/CustomerA.png")
+                st.image("/tmp/diagrams/CustomerB.png")
         except Exception as ex:
             st.error(str(ex))
         finally:
-            import shutil
-            repo_dir = "/tmp/testrepos"
-            if os.path.exists(repo_dir):
-                shutil.rmtree(repo_dir)
-
-    # print(customerB_url, customerA_url)
-    # if st.button("Submit"):
-    #     m1(customerA_url, customerB_url)
+            repo_dirs = ["/tmp/testrepos", "/tmp/diagrams"]
+            for repo_dir in repo_dirs:
+                if os.path.exists(repo_dir):
+                    shutil.rmtree(repo_dir)
